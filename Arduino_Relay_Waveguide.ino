@@ -42,7 +42,7 @@ void setupIO(void) {
   pinMode(pos_pins[0],INPUT); //pos 1 / "Safe" pos
   pinMode(pos_pins[1],INPUT); //pos 2 / tokamak pos
   pinMode(trigger_input, INPUT); 
-  attachInterrupt(digitalPinToInterrupt(trigger_input),input_change,CHANGE);
+  attachInterrupt(digitalPinToInterrupt(trigger_input),input_change,CHANGE); //Attach interrupt to enable immediate reaction to command signals
   pinMode(position_output, OUTPUT); 
   pinMode(interlock_pin, INPUT);
   pinMode(13,OUTPUT);
@@ -75,11 +75,16 @@ void loop() {
       command_pos_bounced = command_pos;
   }
 }
+
+//Called when interrupt caused by external trigger signal change
 void input_change(){
+  /*
   command_pos = (PIND & (1 << PIND2));
   delay(50);
   if((PIND & (1 << PIND2)) == command_pos)
     command_pos_bounced = command_pos;
+  */
+ command_pos_bounced = (PIND & (1 << PIND2));
 }
 //Sets the pins for the relays to move waveguide
 /*
@@ -91,19 +96,23 @@ PD4 - Relay 4
 void pos(int pos)
 {
   if(pos == 1) {
-    PORTD &= ~0xC0; //off R1 and R2
-    PORTD |= 0x30;  //on R3 and R4
-    while(getpos() != 1); //Wait for movement to complete
-    delay(75);
-    PORTD &= ~0xF0; //off everything
+    if(getpos() != 1){
+      PORTD &= ~0xC0; //off R1 and R2
+      PORTD |= 0x30;  //on R3 and R4
+      while(getpos() != 1); //Wait for movement to complete
+      delay(switchtime); //Time after switch happens to still apply current, helps minimize bouncing of the contact
+      PORTD &= ~0xF0; //off everything
+    }
   }
 
   else if(pos == 2) {
-    PORTD &= ~0x30; //off R3 and R4
-    PORTD |= 0xC0;  //on R1 and R2
-    while(getpos() != 2); //Wait for movement to complete (TODO: Add routine to stop if it takes too long)
-    delay(75);
-    PORTD &= ~0xF0; //off everything
+    if(getpos() != 2){
+      PORTD &= ~0x30; //off R3 and R4
+      PORTD |= 0xC0;  //on R1 and R2
+      while(getpos() != 2); //Wait for movement to complete (TODO: Add routine to stop if it takes too long)
+      delay(switchtime); //Time after switch happens to still apply current, helps minimize bouncing of the contact
+      PORTD &= ~0xF0; //off everything
+    }
   }
 }
 //Get the position of the waveguide, can either be position 1, 2 or in between
@@ -120,6 +129,8 @@ uint8_t getpos(void){
   else
     return 3;
 }
+
+//TODO: Use 2 pins to also show when waveguide switch is between 2 posistions
 void set_position_output(){
   current_pos = getpos();
   //for feedback
