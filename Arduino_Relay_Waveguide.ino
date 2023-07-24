@@ -1,12 +1,19 @@
 #define switchtime 75 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
 #define debounce 20
-void pos(int pos);
-uint8_t getpos(void);
+#define POSPIN (PIND & (1 << PIND2)
+typedef enum {
+  load = 1,
+  tokamak = 2,
+  between = 3,
+  error = 0,
+  } position_t;
+void pos(position_t pos);
+position_t getpos(void);
 void setupIO(void);
 void set_position_output();
-volatile uint8_t current_pos = 0;
-volatile uint8_t command_pos_bounced = 0;
-volatile uint8_t command_pos = 0;
+volatile position_t current_pos = 0;
+volatile position_t command_pos_bounced = 0;
+volatile position_t command_pos = 0;
 uint8_t last_pos = 0;
 uint8_t relaypin[4] = {4, 5, 6, 7}; //PD4, PD5, PD6, PD7
 uint8_t pos_pins[2] = {A0,A1}; // PC0 and PC1
@@ -14,6 +21,7 @@ uint8_t trigger_input = 2; //D2 / PD2
 uint8_t position_output = 8; //D8 / PB0
 uint8_t interlock_pin = 9; //D9 / PB1
 bool LED_STATE = true;
+
 /*
 PD7 - Relay 1
 PD6 - Relay 2
@@ -54,22 +62,20 @@ void setup() {
 }
 
 void loop() {
-  //set_position_output(); //Sets the output pin to reflect the current measured position
-  if((PIND & (1 << PIND2)) == command_pos_bounced){
-    //If command signal is low, deliver power to tokamak
+  if(POSPIN == command_pos_bounced){
+    //If command signal is high, deliver power to tokamak
     if(command_pos_bounced){
-      if(current_pos == 1 || current_pos == 0)
-        pos(2);
+      if(current_pos == load || current_pos == between)
+        pos(tokamak);
     }
-
-    //If signal is high go to safe position where power is delivered to load
+    //If signal is low go to safe position where power is delivered to load
     else if(!command_pos_bounced){
-      if(current_pos == 2 || current_pos == 0)
-        pos(1);
+      if(current_pos == tokamak || current_pos == between)
+        pos(load);
     }
   }
   else{
-    command_pos = (PIND & (1 << PIND2));
+    command_pos = POSPIN;
     delay(50);
     if((PIND & (1 << PIND2)) == command_pos)
       command_pos_bounced = command_pos;
@@ -78,13 +84,7 @@ void loop() {
 
 //Called when interrupt caused by external trigger signal change
 void input_change(){
-  /*
-  command_pos = (PIND & (1 << PIND2));
-  delay(50);
-  if((PIND & (1 << PIND2)) == command_pos)
-    command_pos_bounced = command_pos;
-  */
- command_pos_bounced = (PIND & (1 << PIND2));
+ command_pos_bounced = POSPIN; //Set new commanded position
 }
 //Sets the pins for the relays to move waveguide
 /*
@@ -93,10 +93,10 @@ PD6 - Relay 2
 PD5 - Relay 3
 PD4 - Relay 4
 */
-void pos(int pos)
+void pos(position_t pos)
 {
-  if(pos == 1) {
-    if(getpos() != 1){
+  if(pos == load) {
+    if(getpos() != load){ //Only react if it's not already there
       PORTD &= ~0xC0; //off R1 and R2
       PORTD |= 0x30;  //on R3 and R4
       while(getpos() != 1); //Wait for movement to complete
@@ -105,8 +105,8 @@ void pos(int pos)
     }
   }
 
-  else if(pos == 2) {
-    if(getpos() != 2){
+  else if(pos == tokamak) {
+    if(getpos() != tokamak){ //Only react if it's not already there
       PORTD &= ~0x30; //off R3 and R4
       PORTD |= 0xC0;  //on R1 and R2
       while(getpos() != 2); //Wait for movement to complete (TODO: Add routine to stop if it takes too long)
@@ -116,27 +116,26 @@ void pos(int pos)
   }
 }
 //Get the position of the waveguide, can either be position 1, 2 or in between
-uint8_t getpos(void){
+position_t getpos(void){
   //Port C0 and Port C1
   uint8_t reading = (PINC & ((1 << PINC0) | (1 << PINC1))); //Make reading and store in memory
-
   if(! (reading & 0x3) ) //rotor is between the 2 positions
-    return 0;
+    return between;
   if(reading & 1)
-    return 1;
+    return load;
   if(reading & 2)
-    return 2;
+    return between;
   else
-    return 3;
+    return error;
 }
 
 //TODO: Use 2 pins to also show when waveguide switch is between 2 posistions
 void set_position_output(){
   current_pos = getpos();
   //for feedback
-  if(current_pos == 2) // Set when in tokamak position
+  if(current_pos == tokamak) // Set when in tokamak position
     PORTB |= (1 << PORTB0);
-  else if(current_pos == 1) // Clear when in safe position
+  else if(current_pos == load) // Clear when in safe position
     PORTB &= ~(1 << PORTB0);
 }
 ISR(TIMER1_COMPA_vect){
