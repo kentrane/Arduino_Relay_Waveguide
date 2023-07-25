@@ -1,4 +1,4 @@
-#define switchtime 75 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
+#define switchtime 100 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
 #define POSPIN (PIND & (1 << PIND2))
 typedef enum {
   load = 1,
