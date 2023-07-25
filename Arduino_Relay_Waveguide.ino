@@ -1,24 +1,25 @@
 #define switchtime 75 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
-#define debounce 20
-#define POSPIN (PIND & (1 << PIND2)
+#define POSPIN (PIND & (1 << PIND2))
 typedef enum {
   load = 1,
   tokamak = 2,
   between = 3,
   error = 0,
   } position_t;
-void pos(position_t pos);
+void setpos(position_t pos);
 position_t getpos(void);
 void setupIO(void);
 void set_position_output();
-volatile position_t current_pos = 0;
-volatile position_t command_pos_bounced = 0;
-volatile position_t command_pos = 0;
+position_t read_command(void);
+volatile position_t current_pos = load;
+volatile position_t command_pos = load;
 uint8_t last_pos = 0;
 uint8_t relaypin[4] = {4, 5, 6, 7}; //PD4, PD5, PD6, PD7
 uint8_t pos_pins[2] = {A0,A1}; // PC0 and PC1
 uint8_t trigger_input = 2; //D2 / PD2
-uint8_t position_output = 8; //D8 / PB0
+uint8_t pos_out_1 = 10; //  PB2
+uint8_t pos_out_2 = 11; // PB3
+uint8_t pos_out_led = 12; //PB4
 uint8_t interlock_pin = 9; //D9 / PB1
 bool LED_STATE = true;
 
@@ -51,7 +52,9 @@ void setupIO(void) {
   pinMode(pos_pins[1],INPUT); //pos 2 / tokamak pos
   pinMode(trigger_input, INPUT); 
   attachInterrupt(digitalPinToInterrupt(trigger_input),input_change,CHANGE); //Attach interrupt to enable immediate reaction to command signals
-  pinMode(position_output, OUTPUT); 
+  pinMode(pos_out_1, OUTPUT); 
+  pinMode(pos_out_2, OUTPUT); 
+  pinMode(pos_out_led, OUTPUT); 
   pinMode(interlock_pin, INPUT);
   pinMode(13,OUTPUT);
 }
@@ -62,29 +65,27 @@ void setup() {
 }
 
 void loop() {
-  if(POSPIN == command_pos_bounced){
-    //If command signal is high, deliver power to tokamak
-    if(command_pos_bounced){
-      if(current_pos == load || current_pos == between)
-        pos(tokamak);
-    }
-    //If signal is low go to safe position where power is delivered to load
-    else if(!command_pos_bounced){
-      if(current_pos == tokamak || current_pos == between)
-        pos(load);
-    }
+  if(command_pos == tokamak) {
+    if(current_pos == load || current_pos == between)
+      setpos(tokamak);
+  }
+  else if(command_pos == load){
+    if(current_pos == tokamak || current_pos == between)
+      setpos(load);
   }
   else{
-    command_pos = POSPIN;
-    delay(50);
-    if((PIND & (1 << PIND2)) == command_pos)
-      command_pos_bounced = command_pos;
+  //...
   }
 }
-
+position_t read_command(void){
+  if(POSPIN)
+    return tokamak;
+  else
+    return load;
+}
 //Called when interrupt caused by external trigger signal change
 void input_change(){
- command_pos_bounced = POSPIN; //Set new commanded position
+  command_pos = read_command();
 }
 //Sets the pins for the relays to move waveguide
 /*
@@ -93,14 +94,22 @@ PD6 - Relay 2
 PD5 - Relay 3
 PD4 - Relay 4
 */
-void pos(position_t pos)
+void setpos(position_t pos)
 {
   if(pos == load) {
     if(getpos() != load){ //Only react if it's not already there
       PORTD &= ~0xC0; //off R1 and R2
       PORTD |= 0x30;  //on R3 and R4
-      while(getpos() != 1); //Wait for movement to complete
-      delay(switchtime); //Time after switch happens to still apply current, helps minimize bouncing of the contact
+      while(getpos() != load && command_pos == load); //Wait for movement to complete
+      if(command_pos == load){
+        set_position_output();
+        for(int x = 0; x < switchtime; x++){
+          delay(1);
+          if(command_pos != load)
+            PORTD &= ~0xF0; //off everything
+            break;
+        }
+      }
       PORTD &= ~0xF0; //off everything
     }
   }
@@ -109,10 +118,21 @@ void pos(position_t pos)
     if(getpos() != tokamak){ //Only react if it's not already there
       PORTD &= ~0x30; //off R3 and R4
       PORTD |= 0xC0;  //on R1 and R2
-      while(getpos() != 2); //Wait for movement to complete (TODO: Add routine to stop if it takes too long)
-      delay(switchtime); //Time after switch happens to still apply current, helps minimize bouncing of the contact
+      while(getpos() != tokamak && command_pos == tokamak); //Wait for movement to complete
+      if(command_pos == tokamak){ //If it's still commanded to go to the tokamak, do the delay
+      set_position_output();
+        for(int x = 0; x < switchtime; x++){
+          delay(1);
+          if(command_pos != tokamak)
+            PORTD &= ~0xF0; //off everything
+            break;
+        }
+      }
       PORTD &= ~0xF0; //off everything
     }
+  }
+  else{
+    //...
   }
 }
 //Get the position of the waveguide, can either be position 1, 2 or in between
@@ -124,7 +144,7 @@ position_t getpos(void){
   if(reading & 1)
     return load;
   if(reading & 2)
-    return between;
+    return tokamak;
   else
     return error;
 }
@@ -133,13 +153,22 @@ position_t getpos(void){
 void set_position_output(){
   current_pos = getpos();
   //for feedback
-  if(current_pos == tokamak) // Set when in tokamak position
-    PORTB |= (1 << PORTB0);
-  else if(current_pos == load) // Clear when in safe position
-    PORTB &= ~(1 << PORTB0);
+  if(current_pos == tokamak){ // Set when in tokamak position
+    digitalWrite(pos_out_1,LOW);
+    digitalWrite(pos_out_2,HIGH);
+  }
+  else if(current_pos == load){ // Clear when in safe position
+    digitalWrite(pos_out_1,HIGH);
+    digitalWrite(pos_out_2,LOW);
+  }
+  else if(current_pos == between){
+    digitalWrite(pos_out_1,LOW);
+    digitalWrite(pos_out_2,LOW);
+  }
 }
 ISR(TIMER1_COMPA_vect){
-  TCNT1  = 0;                  //First, set the timer back to 0 so it resets for next interrupt
+  TCNT1  = 0; //First, set the timer back to 0 so it resets for next interrupt
   PORTB ^= 0x20; //toggle LED to let user know program is running
   set_position_output();
+  command_pos = read_command();
 }
