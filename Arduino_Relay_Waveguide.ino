@@ -18,8 +18,9 @@ uint8_t relaypin[4] = {4, 5, 6, 7}; //PD4, PD5, PD6, PD7
 uint8_t pos_pins[2] = {A0,A1}; // PC0 and PC1
 uint8_t trigger_input = 2; //D2 / PD2
 uint8_t pos_out_1 = 10; //  PB2
-uint8_t pos_out_2 = 11; // PB3
-uint8_t pos_out_led = 12; //PB4
+//Pin 11 has something stuck in the connector so not useable atm...
+uint8_t pos_out_2 = 12; // PB3
+uint8_t pos_out_led = 13; //PB4
 uint8_t interlock_pin = 9; //D9 / PB1
 bool LED_STATE = true;
 
