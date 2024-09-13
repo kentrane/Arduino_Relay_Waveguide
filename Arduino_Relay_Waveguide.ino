@@ -1,4 +1,4 @@
-#define switchtime 100 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
+#define switchtime 1500 //Time to apply current to motor, enough time to switch, but also not too much so it will get hot
 #define POSPIN (PIND & (1 << PIND2))
 typedef enum {
   load = 1,
@@ -97,11 +97,17 @@ PD4 - Relay 4
 */
 void setpos(position_t pos)
 {
+  uint32_t i = 0;
   if(pos == load) {
     if(getpos() != load){ //Only react if it's not already there
       PORTD &= ~0xC0; //off R1 and R2
       PORTD |= 0x30;  //on R3 and R4
-      while(getpos() != load && command_pos == load); //Wait for movement to complete
+      while(getpos() != load && command_pos == load){
+        ++i;
+        if(i > 2000)
+          break;
+        delay(1);
+      } //Wait for movement to complete
       if(command_pos == load){
         set_position_output();
         for(int x = 0; x < switchtime; x++){
@@ -119,7 +125,12 @@ void setpos(position_t pos)
     if(getpos() != tokamak){ //Only react if it's not already there
       PORTD &= ~0x30; //off R3 and R4
       PORTD |= 0xC0;  //on R1 and R2
-      while(getpos() != tokamak && command_pos == tokamak); //Wait for movement to complete
+      while(getpos() != tokamak && command_pos == tokamak){
+        ++i;
+        if(i > 2000)
+          break;
+        delay(1);
+      } //Wait for movement to complete
       if(command_pos == tokamak){ //If it's still commanded to go to the tokamak, do the delay
       set_position_output();
         for(int x = 0; x < switchtime; x++){
